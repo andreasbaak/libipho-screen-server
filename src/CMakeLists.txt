@@ -6,6 +6,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 
 add_executable(libipho-screen-server libipho-screen-server.c)
 
+target_link_libraries(libipho-screen-server pthread)
+
 install(TARGETS libipho-screen-server
   RUNTIME DESTINATION bin
 )

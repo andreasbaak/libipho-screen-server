@@ -23,6 +23,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,12 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 void errExit(const char* msg)
 {
     fprintf(stderr, "[%s %s] %s\n", (errno > 0) ? ename[errno] : "?UNKNOWN?", strerror(errno), msg);
+    exit(1);
+}
+
+void errExitEN(int en, const char* msg)
+{
+    fprintf(stderr, "[%s %s] %s\n", (en > 0) ? ename[en] : "?UNKNOWN?", strerror(en), msg);
     exit(1);
 }
 
@@ -226,18 +233,28 @@ int bindServerSocker()
     return lfd;
 }
 
-void forwardImages(const char* fifo_filename, int cfd)
-{
-    char filename[255];
-    int res;
+
+static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+static int commandAvailable = 0;
+#define MAX_COMMAND_LENGTH 255
+char command[MAX_COMMAND_LENGTH];
+
+// signature is enforced by the pthread_create function
+void* readCommandsFromFifo(void* fifo_filename_void) {
+    const char* fifo_filename = (const char*) fifo_filename_void;
+    char line[MAX_COMMAND_LENGTH];
+    int perr;
     int fifoFd = -1;
+    int res;
+
     for (;;) {
-        LOG_INFO("Waiting for an image filename on the FIFO %s\n", fifo_filename);
+        LOG_INFO("Waiting for a command on the FIFO %s\n", fifo_filename);
         if (fifoFd < 0) {
             fifoFd = openImageFilenameFifo(fifo_filename);
         }
 
-        res = readLine(fifoFd, filename, sizeof(filename));
+        res = readLine(fifoFd, line, sizeof(line));
         if (res == -1) {
             fprintf(stderr, "FIFO was closed.\n");
             fifoFd = -1;
@@ -253,23 +270,77 @@ void forwardImages(const char* fifo_filename, int cfd)
             continue;
         }
 
-        if (res == 1 && filename[0] == '+') {
+        // We read a line from the fifo. Let's forward it to the consuming thread.
+        perr = pthread_mutex_lock(&mtx);
+        if (perr != 0) {
+            errExitEN(perr, "pthread_mutex_lock");
+        }
+
+        memcpy(command, line, MAX_COMMAND_LENGTH);
+        commandAvailable = 1;
+
+        perr = pthread_mutex_unlock(&mtx);
+        if (perr != 0) {
+            errExitEN(perr, "pthread_mutex_unlock");
+        }
+
+        perr = pthread_cond_signal(&cond); /* Wake sleeping consumer */
+        if (perr != 0) {
+            errExitEN(perr, "pthread_cond_signal");
+        }
+    }
+    return NULL;
+}
+
+
+void forwardImages(int cfd)
+{
+    int perr;
+    char commandCopy[MAX_COMMAND_LENGTH];
+    char cmd[1];
+
+    for (;;) {
+        perr = pthread_mutex_lock(&mtx);
+        if (perr != 0)
+            errExitEN(perr, "pthread_mutex_lock");
+
+        while (commandAvailable == 0) { /* Wait for something to consume */
+            perr = pthread_cond_wait(&cond, &mtx);
+            if (perr != 0) {
+                errExitEN(perr, "pthread_cond_wait");
+            }
+        }
+
+        if (commandAvailable == 0) {
+            // Nothing is available. Just continue to wait.
+            perr = pthread_mutex_unlock(&mtx);
+            continue;
+        }
+
+        // fetch the command from the other thread
+        memcpy(commandCopy, command, MAX_COMMAND_LENGTH);
+        commandAvailable = 0;
+        perr = pthread_mutex_unlock(&mtx);
+        if (perr != 0) {
+            errExitEN(perr, "pthread_mutex_unlock");
+        }
+
+        if (commandCopy[0] == '+') {
             // We received a special command that indicates
             // the "Image has just been taken" command.
-            char command[1];
-            command[0] = COMMAND_IMAGE_TAKEN;
+            cmd[0] = COMMAND_IMAGE_TAKEN;
             LOG_INFO("Sending 'Image taken' command.\n");
-            if (write(cfd, command, sizeof(command)) != sizeof(command)) {
+            if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
                 fprintf(stderr, "Error on write of command\n");
                 break;
             }
-            continue; // wait for the next image filename
+            continue;
         }
 
-        LOG_INFO("Trying to read file %s.\n", filename);
+        LOG_INFO("Trying to read file %s.\n", commandCopy);
         struct File file;
-        if (readFileData(filename, &file) == -1) {
-            LOG_INFO("Could not read file %s.\n", filename);
+        if (readFileData(commandCopy, &file) == -1) {
+            LOG_INFO("Could not read file %s.\n", commandCopy);
             continue;
         }
 
@@ -277,22 +348,25 @@ void forwardImages(const char* fifo_filename, int cfd)
         convertInteger(file.size, numBytesSplit);
 
         LOG_INFO("Sending command 'Image data'\n");
-        char command[1];
-        command[0] = COMMAND_IMAGE_DATA;
-        if (write(cfd, command, sizeof(command)) != sizeof(command)) {
+
+        cmd[0] = COMMAND_IMAGE_DATA;
+        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
             fprintf(stderr, "Error on write of command\n");
+            free(file.data);
             break;
         }
 
         LOG_INFO("Sending file size: %d\n", file.size);
         if (write(cfd, numBytesSplit, sizeof(numBytesSplit)) != sizeof(numBytesSplit)) {
             fprintf(stderr, "Error on write of num bytes\n");
+            free(file.data);
             break;
         }
 
         LOG_INFO("Sending file data.\n");
         if (write(cfd, file.data, file.size) != file.size) {
             fprintf(stderr, "Error on writing file data to the socket.\n");
+            free(file.data);
             break;
         }
 
@@ -312,7 +386,7 @@ void forwardImages(const char* fifo_filename, int cfd)
  * the connection is closed and we wait for the
  * next incoming client.
  */
-void acceptClientConnection(int lfd, const char* fifo_filename)
+void acceptClientConnection(int lfd)
 {
     struct sockaddr_storage claddr;
     int cfd;
@@ -327,7 +401,8 @@ void acceptClientConnection(int lfd, const char* fifo_filename)
             continue;
         }
         LOG_INFO("Connection accepted.\n");
-        forwardImages(fifo_filename, cfd);
+
+        forwardImages(cfd);
     }
 }
 
@@ -350,6 +425,15 @@ int main(int argc, char *argv[])
     const char* fifo_filename = argv[1];
     createImageFilenameFifo(fifo_filename);
     int lfd = bindServerSocker();
-    acceptClientConnection(lfd, fifo_filename);
+
+    // Create a thread that reads commands from the pipe
+    // and forwards the commands to our main thread.
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, readCommandsFromFifo, (void*)fifo_filename) != 0) {
+        fprintf(stderr, "Error while trying to create a thread.\n");
+        exit(1);
+    }
+
+    acceptClientConnection(lfd);
     return 0;
 }
