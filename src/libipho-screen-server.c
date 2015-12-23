@@ -37,7 +37,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #define LOG_INFO(...) printf(__VA_ARGS__)
 
 #define PORT_NUM "1338"
-#define BACKLOG 1
+#define BACKLOG 0
 #define MAX_FN_LENGHT 255;
 
 #define COMMAND_IMAGE_TAKEN 1
