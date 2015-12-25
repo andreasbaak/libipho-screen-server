@@ -172,8 +172,9 @@ void hearbeat(int cfd)
     }
 }
 
-static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+static pthread_mutex_t commandMtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t commandCond = PTHREAD_COND_INITIALIZER;
 static int commandAvailable = 0;
 #define MAX_COMMAND_LENGTH 255
 char command[MAX_COMMAND_LENGTH];
@@ -209,7 +210,7 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
         }
 
         // We read a line from the fifo. Let's forward it to the consuming thread.
-        perr = pthread_mutex_lock(&mtx);
+        perr = pthread_mutex_lock(&commandMtx);
         if (perr != 0) {
             errExitEN(perr, "pthread_mutex_lock");
         }
@@ -217,12 +218,12 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
         memcpy(command, line, MAX_COMMAND_LENGTH);
         commandAvailable = 1;
 
-        perr = pthread_mutex_unlock(&mtx);
+        perr = pthread_mutex_unlock(&commandMtx);
         if (perr != 0) {
             errExitEN(perr, "pthread_mutex_unlock");
         }
 
-        perr = pthread_cond_signal(&cond); // Wake consumer
+        perr = pthread_cond_signal(&commandCond); // Wake consumer
         if (perr != 0) {
             errExitEN(perr, "pthread_cond_signal");
         }
@@ -237,18 +238,18 @@ void forwardImages(int cfd)
     char cmd[1];
 
     for (;;) {
-        perr = pthread_mutex_lock(&mtx);
+        perr = pthread_mutex_lock(&commandMtx);
         if (perr != 0)
             errExitEN(perr, "pthread_mutex_lock");
 
         while (commandAvailable == 0) { // Wait for producer
             struct timespec timeout_time = computeAbsoluteTimeout(5e8);
-            perr = pthread_cond_timedwait(&cond, &mtx, &timeout_time);
+            perr = pthread_cond_timedwait(&commandCond, &commandMtx, &timeout_time);
             if (perr == ETIMEDOUT) {
                 // Check wheter the client is still alive.
                 if (getClientStatus() == DEAD) {
                     printf("While waiting for commands, the heartbeat signaled that the client is dead.\n");
-                    perr = pthread_mutex_unlock(&mtx);
+                    perr = pthread_mutex_unlock(&commandMtx);
                     // Also close our file descriptor
                     if (close(cfd) == -1) {
                         errMsg("close");
@@ -262,14 +263,14 @@ void forwardImages(int cfd)
 
         if (commandAvailable == 0) {
             // Nothing is available. Just continue to wait.
-            perr = pthread_mutex_unlock(&mtx);
+            perr = pthread_mutex_unlock(&commandMtx);
             continue;
         }
 
         // fetch the command from the other thread
         memcpy(commandCopy, command, MAX_COMMAND_LENGTH);
         commandAvailable = 0;
-        perr = pthread_mutex_unlock(&mtx);
+        perr = pthread_mutex_unlock(&commandMtx);
         if (perr != 0) {
             errExitEN(perr, "pthread_mutex_unlock");
         }
