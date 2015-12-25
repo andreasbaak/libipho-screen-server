@@ -48,14 +48,31 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #define COMMAND_HEARBEAT_PROBE 3;
 
 /**
- * numBytesSplit has to point to at least 4 bytes of memory.
+ * Converts an integer into a byte array of 4 bytes so that
+ * the byte array representation is independent of the
+ * byte order of the host system.
+ *
+ * The caller has to provide a pointer byteArray that
+ * points to at lease 4 bytes of memory.
+ * byteArray will be filled as follows:
+ *
+ * byteArray[0] = Least significant 8 bits
+ * byteArray[1] = ..
+ * byteArray[2] = ..
+ * byteArray[3] = Most significant 8 bits
+ *
+ * \param integer
+ * The integer to convert
+ * \param byteArray
+ * At least 4 bytes of allocated memory. This memory area
+ * will contain the representation of the integer.
  */
-void convertInteger(int fileSize, char* numBytesSplit)
+void intToByteArray(int integer, char* byteArray)
 {
     int i;
     for (i = 0; i < 4; ++i) {
-        numBytesSplit[i] = (char) ((fileSize % 0xff) & 0xff);
-        fileSize /= 0xff;
+        byteArray[i] = (char) ((integer % 0xff) & 0xff);
+        integer /= 0xff;
     }
 }
 
@@ -275,7 +292,7 @@ void forwardImages(int cfd)
         }
 
         char numBytesSplit[4];
-        convertInteger(file.size, numBytesSplit);
+        intToByteArray(file.size, numBytesSplit);
 
         LOG_INFO("Sending command 'Image data'\n");
 
