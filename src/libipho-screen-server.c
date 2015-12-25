@@ -93,9 +93,6 @@ int openImageFilenameFifo(const char* fifo_name)
     // Open extra write descriptor to avoid that we ever see an EOF
     if (open(fifo_name, O_WRONLY) == -1)
         errExit("Open dummy fifo\n");
-    // ignore the sigpipe just in case
-    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
-        errExit("signal\n");
     return fifoFd;
 }
 
@@ -423,6 +420,11 @@ int main(int argc, char *argv[])
         usage(argv[0]);
     }
     const char* fifo_filename = argv[1];
+
+    // Ignore the sigpipe so that we can find out about a broken connection
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+        errExit("signal\n");
+
     createImageFilenameFifo(fifo_filename);
     int lfd = bindServerSocker();
 
