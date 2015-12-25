@@ -37,13 +37,15 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 
 #define LOG_INFO(...) printf(__VA_ARGS__)
 
-#define PORT_NUM "1338"
+#define DATA_PORT_NUM "1338"
+#define HEARTBEAT_PORT_NUM "1339"
+
 #define BACKLOG 0
 #define MAX_FN_LENGHT 255;
 
 #define COMMAND_IMAGE_TAKEN 1
 #define COMMAND_IMAGE_DATA  2
-#define COMMAND_KEEPALIVE_PROBE 3;
+#define COMMAND_HEARBEAT_PROBE 3;
 
 void errExit(const char* msg)
 {
@@ -182,7 +184,7 @@ int readFileData(const char* filename, struct File* file)
  *
  * \return file descriptor corresponding to the server socket
  */
-int bindServerSocket()
+int bindServerSocket(const char* portNum)
 {
     LOG_INFO("Binding server socket.\n");
 
@@ -201,7 +203,7 @@ int bindServerSocket()
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
     hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
-    if (getaddrinfo(NULL, PORT_NUM, &hints, &result) != 0)
+    if (getaddrinfo(NULL, portNum, &hints, &result) != 0)
         errExit("getaddrinfo\n");
 
     // Walk through the list until we find an address to bind to.
@@ -232,6 +234,98 @@ int bindServerSocket()
     return lfd;
 }
 
+static pthread_cond_t clientAliveCond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t clientStatusMtx = PTHREAD_MUTEX_INITIALIZER;
+typedef enum { DEAD, ALIVE } ClientStatus;
+static ClientStatus clientStatus = DEAD;
+
+void wakeDataConnection()
+{
+    int perr = pthread_cond_signal(&clientAliveCond); // Wake consumer
+    if (perr != 0) {
+        errExitEN(perr, "pthread_cond_signal");
+    }
+}
+
+void waitForClientAlive()
+{
+    int perr = pthread_mutex_lock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_lock");
+    }
+    while (clientStatus == DEAD) {
+        perr = pthread_cond_wait(&clientAliveCond, &clientStatusMtx);
+        if (perr != 0) {
+            errExitEN(perr, "pthread_cond_wait");
+        }
+    }
+    perr = pthread_mutex_unlock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_unlock");
+    }
+}
+
+void setClientStatus(ClientStatus status)
+{
+    int perr;
+    perr = pthread_mutex_lock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_unlock");
+    }
+    clientStatus = status;
+    perr = pthread_mutex_unlock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_unlock");
+    }
+}
+
+ClientStatus getClientStatus()
+{
+    int status;
+    int perr;
+    perr = pthread_mutex_lock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_unlock");
+    }
+    status = clientStatus;
+    perr = pthread_mutex_unlock(&clientStatusMtx);
+    if (perr != 0) {
+        errExitEN(perr, "pthread_mutex_unlock");
+    }
+    return status;
+}
+
+/* Return 0 if we cannot write data to the client file descriptor
+ * successfully, 1 otherwise.
+ */
+int isClientAlive(int cfd) {
+    char cmd[1];
+    cmd[0] = COMMAND_HEARBEAT_PROBE;
+    unsigned int i;
+
+    for (i = 0; i < 1; ++i) {
+        printf("Sending keepalive probe.\n");
+        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+            errMsg("Error on write of keepalive probe");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void hearbeat(int cfd)
+{
+    for (;;) {
+        if (!isClientAlive(cfd)) {
+            setClientStatus(DEAD);
+            break;
+        }
+        usleep(5e5);
+    }
+    if (close(cfd) == -1) {
+        errMsg("close");
+    }
+}
 
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -291,30 +385,6 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
     return NULL;
 }
 
-/* Return 0 if we cannot write data to the client file descriptor
- * successfully, 1 otherwise.
- */
-int isClientAlive(int cfd) {
-    char cmd[1];
-    char ret[1];
-    cmd[0] = COMMAND_KEEPALIVE_PROBE;
-    unsigned int i;
-
-    for (i = 0; i < 1; ++i) {
-        printf("Sending keepalive probe.\n");
-        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
-            errMsg("Error on write of keepalive probe");
-            return 0;
-        }
-        if (read(cfd, ret, sizeof(ret)) != sizeof(ret)) {
-            errMsg("Error on read of keepalive return");
-            return 0;
-        }
-        printf("Received return: %d\n", ret[0]);
-    }
-    return 1;
-}
-
 void forwardImages(int cfd)
 {
     int perr;
@@ -330,10 +400,14 @@ void forwardImages(int cfd)
             struct timespec timeout_time = computeAbsoluteTimeout(2e9);
             perr = pthread_cond_timedwait(&cond, &mtx, &timeout_time);
             if (perr == ETIMEDOUT) {
-                // It's time to send a ping to the client in order to
-                // check whether she's alive!
-                if (!isClientAlive(cfd)) {
+                // Check wheter the client is still alive.
+                if (getClientStatus() == DEAD) {
+                    printf("While waiting for commands, the heartbeat signaled that the client is dead.\n");
                     perr = pthread_mutex_unlock(&mtx);
+                    // Also close our file descriptor
+                    if (close(cfd) == -1) {
+                        errMsg("close");
+                    }
                     return;
                 }
             } else if (perr != 0) { // all other error cases
@@ -403,6 +477,7 @@ void forwardImages(int cfd)
         LOG_INFO("Done sending.\n");
         free(file.data);
     }
+    setClientStatus(DEAD);
     if (close(cfd) == -1) {
         errMsg("close");
     }
@@ -416,13 +491,17 @@ void forwardImages(int cfd)
  * the connection is closed and we wait for the
  * next incoming client.
  */
-void acceptClientConnection(int lfd)
+void acceptDataConnection()
 {
     struct sockaddr_storage claddr;
     int cfd;
     socklen_t addrlen;
 
     for (;;) { // Serve only one client connection at a time.
+        LOG_INFO("Waiting for the client heartbeat.\n");
+        waitForClientAlive();
+
+        int lfd = bindServerSocket(DATA_PORT_NUM);
         addrlen = sizeof(struct sockaddr_storage);
         LOG_INFO("Waiting for an image receiver to connect.\n");
         cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
@@ -433,6 +512,39 @@ void acceptClientConnection(int lfd)
         LOG_INFO("Connection accepted.\n");
 
         forwardImages(cfd);
+        if (close(cfd) == -1) {
+          errMsg("close");
+        }
+        if (close(lfd) == -1) {
+          errMsg("close");
+        }
+    }
+}
+
+
+void* acceptHeartbeatConnection()
+{
+    struct sockaddr_storage claddr;
+    int cfd;
+    socklen_t addrlen;
+
+    for (;;) { // Serve only one client connection at a time.
+        addrlen = sizeof(struct sockaddr_storage);
+        int lfd = bindServerSocket(HEARTBEAT_PORT_NUM);
+        LOG_INFO("Waiting for an client to connect to the heartbeat channel.\n");
+        cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
+        if (cfd == -1) {
+            errMsg("accept hearbeat");
+            continue;
+        }
+        LOG_INFO("Hearbeat connection accepted.\n");
+        setClientStatus(ALIVE);
+        wakeDataConnection();
+        hearbeat(cfd);
+        // hearbeat will only return if the cfd is close.
+        if (close(lfd) != 0) {
+            errExit("hearbeat close_lfd");
+        }
     }
 }
 
@@ -459,17 +571,24 @@ int main(int argc, char *argv[])
         errExit("signal\n");
 
     createImageFilenameFifo(fifo_filename);
-    int lfd = bindServerSocket();
 
     // Create a thread that reads commands from the pipe
     // and forwards the commands to our main thread.
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, readCommandsFromFifo, (void*)fifo_filename) != 0) {
+    pthread_t command_tid;
+    if (pthread_create(&command_tid, NULL, readCommandsFromFifo, (void*)fifo_filename) != 0) {
         fprintf(stderr, "Error while trying to create a thread.\n");
         exit(1);
     }
 
-    acceptClientConnection(lfd);
+    // Create a thread that sends a heartbeat to the client
+    // in order to check whether she is alive
+    pthread_t heartbeat_tid;
+    if (pthread_create(&heartbeat_tid, NULL, acceptHeartbeatConnection, NULL) != 0) {
+        fprintf(stderr, "Error while trying to create a thread.\n");
+        exit(1);
+    }
+
+    acceptDataConnection();
     return 0;
 }
 
