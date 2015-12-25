@@ -412,7 +412,7 @@ void* acceptHeartbeatConnection()
         LOG_INFO("Waiting for an client to connect to the heartbeat channel.\n");
         cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
         if (cfd == -1) {
-            errMsg("accept hearbeat");
+            errMsg("accept heartbeat");
             continue;
         }
         LOG_INFO("Hearbeat connection accepted.\n");
