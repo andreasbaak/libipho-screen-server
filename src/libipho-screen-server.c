@@ -47,6 +47,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #define COMMAND_IMAGE_DATA  2
 #define COMMAND_HEARBEAT_PROBE 3;
 
+typedef enum { FALSE, TRUE } Boolean;
 
 static pthread_cond_t clientAliveCond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t clientStatusMtx = PTHREAD_MUTEX_INITIALIZER;
@@ -112,19 +113,15 @@ ClientStatus getClientStatus()
 /* Return 0 if we cannot write data to the client file descriptor
  * successfully, 1 otherwise.
  */
-int isClientAlive(int cfd) {
+Boolean isClientHearbeatAlive(int cfd) {
     char cmd[1];
     cmd[0] = COMMAND_HEARBEAT_PROBE;
-    unsigned int i;
 
-    for (i = 0; i < 1; ++i) {
-        printf("Sending keepalive probe.\n");
-        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
-            errMsg("Error on write of keepalive probe");
-            return 0;
-        }
+    if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+        errMsg("Error on write of keepalive probe");
+        return FALSE;
     }
-    return 1;
+    return TRUE;
 }
 
 void hearbeat(int cfd)
