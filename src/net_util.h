@@ -30,7 +30,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
  * \param portNum
  * String that represent the port number that the server socket should bind to
  * \param backlog
- * Maximal length of the queue of pending connections, see <man listen>
+ * Maximal length of the queue of pending connections, see <man listen>.
  * \return
  * File descriptor corresponding to the server socket in listen mode.
  */
