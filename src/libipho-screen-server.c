@@ -397,7 +397,7 @@ void forwardImages(int cfd)
             errExitEN(perr, "pthread_mutex_lock");
 
         while (commandAvailable == 0) { // Wait for producer
-            struct timespec timeout_time = computeAbsoluteTimeout(2e9);
+            struct timespec timeout_time = computeAbsoluteTimeout(5e8);
             perr = pthread_cond_timedwait(&cond, &mtx, &timeout_time);
             if (perr == ETIMEDOUT) {
                 // Check wheter the client is still alive.
