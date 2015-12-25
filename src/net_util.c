@@ -78,3 +78,11 @@ int bindServerSocket(const char* portNum, int backlog)
     return lfd;
 }
 
+void intToByteArray(int integer, char* byteArray)
+{
+    int i;
+    for (i = 0; i < 4; ++i) {
+        byteArray[i] = (char) ((integer % 0xff) & 0xff);
+        integer /= 0xff;
+    }
+}

@@ -36,6 +36,27 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
  */
 int bindServerSocket(const char* portNum, int backlog);
 
+/**
+ * Converts an integer into a byte array of 4 bytes so that
+ * the byte array representation is independent of the
+ * byte order of the host system.
+ *
+ * The caller has to provide a pointer byteArray that
+ * points to at lease 4 bytes of memory.
+ * byteArray will be filled as follows:
+ *
+ * byteArray[0] = Least significant 8 bits
+ * byteArray[1] = ..
+ * byteArray[2] = ..
+ * byteArray[3] = Most significant 8 bits
+ *
+ * \param integer
+ * The integer to convert
+ * \param byteArray
+ * At least 4 bytes of allocated memory. This memory area
+ * will contain the representation of the integer.
+ */
+void intToByteArray(int integer, char* byteArray);
 
 #endif
 
