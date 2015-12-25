@@ -31,8 +31,9 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <time.h>
 #include "ename.c.inc"
+#include "time_util.h"
 
 #define LOG_INFO(...) printf(__VA_ARGS__)
 
@@ -42,6 +43,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 
 #define COMMAND_IMAGE_TAKEN 1
 #define COMMAND_IMAGE_DATA  2
+#define COMMAND_KEEPALIVE_PROBE 3;
 
 void errExit(const char* msg)
 {
@@ -281,7 +283,7 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
             errExitEN(perr, "pthread_mutex_unlock");
         }
 
-        perr = pthread_cond_signal(&cond); /* Wake sleeping consumer */
+        perr = pthread_cond_signal(&cond); // Wake consumer
         if (perr != 0) {
             errExitEN(perr, "pthread_cond_signal");
         }
@@ -289,6 +291,29 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
     return NULL;
 }
 
+/* Return 0 if we cannot write data to the client file descriptor
+ * successfully, 1 otherwise.
+ */
+int isClientAlive(int cfd) {
+    char cmd[1];
+    char ret[1];
+    cmd[0] = COMMAND_KEEPALIVE_PROBE;
+    unsigned int i;
+
+    for (i = 0; i < 1; ++i) {
+        printf("Sending keepalive probe.\n");
+        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+            errMsg("Error on write of keepalive probe");
+            return 0;
+        }
+        if (read(cfd, ret, sizeof(ret)) != sizeof(ret)) {
+            errMsg("Error on read of keepalive return");
+            return 0;
+        }
+        printf("Received return: %d\n", ret[0]);
+    }
+    return 1;
+}
 
 void forwardImages(int cfd)
 {
@@ -301,9 +326,17 @@ void forwardImages(int cfd)
         if (perr != 0)
             errExitEN(perr, "pthread_mutex_lock");
 
-        while (commandAvailable == 0) { /* Wait for something to consume */
-            perr = pthread_cond_wait(&cond, &mtx);
-            if (perr != 0) {
+        while (commandAvailable == 0) { // Wait for producer
+            struct timespec timeout_time = computeAbsoluteTimeout(2e9);
+            perr = pthread_cond_timedwait(&cond, &mtx, &timeout_time);
+            if (perr == ETIMEDOUT) {
+                // It's time to send a ping to the client in order to
+                // check whether she's alive!
+                if (!isClientAlive(cfd)) {
+                    perr = pthread_mutex_unlock(&mtx);
+                    return;
+                }
+            } else if (perr != 0) { // all other error cases
                 errExitEN(perr, "pthread_cond_wait");
             }
         }
@@ -439,3 +472,4 @@ int main(int argc, char *argv[])
     acceptClientConnection(lfd);
     return 0;
 }
+

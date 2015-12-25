@@ -8,7 +8,7 @@ add_library(time-util STATIC time_util.c)
 
 add_executable(libipho-screen-server libipho-screen-server.c)
 
-target_link_libraries(libipho-screen-server pthread)
+target_link_libraries(libipho-screen-server pthread time-util)
 
 install(TARGETS libipho-screen-server
   RUNTIME DESTINATION bin
