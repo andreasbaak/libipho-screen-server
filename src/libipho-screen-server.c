@@ -49,19 +49,31 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 
 typedef enum { FALSE, TRUE } Boolean;
 
-static pthread_cond_t clientAliveCond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t clientStatusMtx = PTHREAD_MUTEX_INITIALIZER;
 typedef enum { DEAD, ALIVE } ClientStatus;
+// clientStatus indicates wheter the Android app is connected or not.
+// Access to the clientStatus is secured via the mutex ClientStatusMtx.
+// A thread can be waiting for the clientStatus to become ALIVE.
+// To this end, we set up the clientAliveCond conditional variable
+// that is notified once the client has connected.
 static ClientStatus clientStatus = DEAD;
+static pthread_mutex_t clientStatusMtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t clientAliveCond = PTHREAD_COND_INITIALIZER;
 
-void wakeDataConnection()
+/**
+ * Wake up threads that wait for the client app to become available.
+ */
+void wakeClientAliveWaiter()
 {
-    int perr = pthread_cond_signal(&clientAliveCond); // Wake consumer
+    int perr = pthread_cond_signal(&clientAliveCond); // Wake waiting thread
     if (perr != 0) {
         errExitEN(perr, "pthread_cond_signal");
     }
 }
 
+/**
+ * Suspend the current thread until a client app has become available.
+ * Returns immediately if the client is already available.
+ */
 void waitForClientAlive()
 {
     int perr = pthread_mutex_lock(&clientStatusMtx);
@@ -80,6 +92,9 @@ void waitForClientAlive()
     }
 }
 
+/**
+ * Safely set the client status secured by the corresponding mutex.
+ */
 void setClientStatus(ClientStatus status)
 {
     int perr;
@@ -94,6 +109,9 @@ void setClientStatus(ClientStatus status)
     }
 }
 
+/**
+ * Safely get the client status secured by the corresponding mutex.
+ */
 ClientStatus getClientStatus()
 {
     int status;
@@ -110,8 +128,15 @@ ClientStatus getClientStatus()
     return status;
 }
 
-/* Return 0 if we cannot write data to the client file descriptor
- * successfully, 1 otherwise.
+/**
+ * Writes a heartbeat probe to the provided file descriptor.
+ * If an error occurrs while writing, assume that the client is not alive.
+ *
+ * \param cfd
+ * File descriptor that we send a heartbeat probe to.
+ * \return
+ * TRUE if the client is alive, FALSE otherwise.
+ *
  */
 Boolean isClientHearbeatAlive(int cfd) {
     char cmd[1];
@@ -124,10 +149,19 @@ Boolean isClientHearbeatAlive(int cfd) {
     return TRUE;
 }
 
+
+/**
+ * Continuously sends a hearbeat probe to the client.
+ * The function returns as soon the heartbeat channel
+ * cannot be written to anymore.
+ *
+ * \param cfd
+ * File descriptor to send the probe to.
+ */
 void hearbeat(int cfd)
 {
     for (;;) {
-        if (!isClientAlive(cfd)) {
+        if (!isClientHearbeatAlive(cfd)) {
             setClientStatus(DEAD);
             break;
         }
@@ -350,7 +384,7 @@ void* acceptHeartbeatConnection()
         }
         LOG_INFO("Hearbeat connection accepted.\n");
         setClientStatus(ALIVE);
-        wakeDataConnection();
+        wakeClientAliveWaiter();
         hearbeat(cfd);
         // hearbeat will only return if the cfd is close.
         if (close(lfd) != 0) {
