@@ -182,7 +182,7 @@ int readFileData(const char* filename, struct File* file)
  *
  * \return file descriptor corresponding to the server socket
  */
-int bindServerSocker()
+int bindServerSocket()
 {
     LOG_INFO("Binding server socket.\n");
 
@@ -459,7 +459,7 @@ int main(int argc, char *argv[])
         errExit("signal\n");
 
     createImageFilenameFifo(fifo_filename);
-    int lfd = bindServerSocker();
+    int lfd = bindServerSocket();
 
     // Create a thread that reads commands from the pipe
     // and forwards the commands to our main thread.
