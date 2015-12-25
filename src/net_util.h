@@ -22,6 +22,8 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #ifndef NET_UTIL_H_
 #define NET_UTIL_H_
 
+#include "boolean_util.h"
+
 /**
  * Create a server socket at any available host interface on the provided port.
  * Bind a file descriptor to it and put it into into listen mode.
@@ -58,5 +60,15 @@ int bindServerSocket(const char* portNum, int backlog);
  */
 void intToByteArray(int integer, char* byteArray);
 
+
+/**
+ * Send length bytes of the provided buffer on the provided file descriptor
+ * by repeatedly probing the write function until either
+ * the whole length bytes have been written or an error occured.
+ *
+ * \return
+ * TRUE if all bytes have been sent, FALSE otherwise.
+ */
+Boolean writeFully(int fd, const char* buffer, size_t length);
 #endif
 

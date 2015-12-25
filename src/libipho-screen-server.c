@@ -141,7 +141,7 @@ Boolean isClientHearbeatAlive(int cfd) {
     char cmd[1];
     cmd[0] = COMMAND_HEARBEAT_PROBE;
 
-    if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+    if (!writeFully(cfd, cmd, sizeof(cmd))) {
         errMsg("Error on write of keepalive probe");
         return FALSE;
     }
@@ -279,7 +279,7 @@ void forwardImages(int cfd)
             // the "Image has just been taken" command.
             cmd[0] = COMMAND_IMAGE_TAKEN;
             LOG_INFO("Sending 'Image taken' command.\n");
-            if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+            if (!writeFully(cfd, cmd, sizeof(cmd))) {
                 fprintf(stderr, "Error on write of command\n");
                 break;
             }
@@ -299,21 +299,21 @@ void forwardImages(int cfd)
         LOG_INFO("Sending command 'Image data'\n");
 
         cmd[0] = COMMAND_IMAGE_DATA;
-        if (write(cfd, cmd, sizeof(cmd)) != sizeof(cmd)) {
+        if (!writeFully(cfd, cmd, sizeof(cmd))) {
             fprintf(stderr, "Error on write of command\n");
             free(file.data);
             break;
         }
 
         LOG_INFO("Sending file size: %d\n", file.size);
-        if (write(cfd, numBytesSplit, sizeof(numBytesSplit)) != sizeof(numBytesSplit)) {
+        if (!writeFully(cfd, numBytesSplit, sizeof(numBytesSplit))) {
             fprintf(stderr, "Error on write of num bytes\n");
             free(file.data);
             break;
         }
 
         LOG_INFO("Sending file data.\n");
-        if (write(cfd, file.data, file.size) != file.size) {
+        if (!writeFully(cfd, file.data, file.size)) {
             fprintf(stderr, "Error on writing file data to the socket.\n");
             free(file.data);
             break;

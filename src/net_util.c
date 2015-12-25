@@ -86,3 +86,20 @@ void intToByteArray(int integer, char* byteArray)
         integer /= 0xff;
     }
 }
+
+Boolean writeFully(int fd, const char* buffer, size_t length)
+{
+    ssize_t n;
+    const char *p = buffer;
+    while (length > 0)
+    {
+        n = write(fd, p, length);
+        if (n == -1) {
+            errMsg("write");
+            return FALSE;
+        }
+        p += n;
+        length -= n;
+    }
+    return TRUE;
+}
