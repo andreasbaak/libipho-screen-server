@@ -22,6 +22,7 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #include "err_util.h"
 #include "file_util.h"
 #include "log_util.h"
+#include "net_util.h"
 #include "time_util.h"
 
 #include <netdb.h>
@@ -58,59 +59,6 @@ void convertInteger(int fileSize, char* numBytesSplit)
     }
 }
 
-/**
- *
- * \return file descriptor corresponding to the server socket
- */
-int bindServerSocket(const char* portNum)
-{
-    LOG_INFO("Binding server socket to port %s.\n", portNum);
-
-    struct addrinfo hints;
-    struct addrinfo* result;
-    struct addrinfo* rp;
-
-    int optval;
-    int lfd;
-
-    // Call getaddrinfo() to obtain a list of addresses that we can try binding to
-    memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_canonname = NULL;
-    hints.ai_addr = NULL;
-    hints.ai_next = NULL;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-    hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
-    if (getaddrinfo(NULL, portNum, &hints, &result) != 0)
-        errExit("getaddrinfo\n");
-
-    // Walk through the list until we find an address to bind to.
-    optval = 1;
-    for (rp = result; rp != NULL; rp = rp->ai_next) {
-        lfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (lfd == -1) {
-            continue; // On error, try next address
-        }
-        if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) == -1) {
-            errExit("setsockopt\n");
-        }
-        if (bind(lfd, rp->ai_addr, rp->ai_addrlen) == 0) {
-            break; // success
-        }
-        close(lfd);
-    }
-
-    if (rp == NULL) {
-        errExit("Could not bind socket to any address\n");
-    }
-
-    if (listen(lfd, BACKLOG) == -1) {
-        errExit("Listen\n");
-    }
-
-    freeaddrinfo(result);
-    return lfd;
-}
 
 static pthread_cond_t clientAliveCond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t clientStatusMtx = PTHREAD_MUTEX_INITIALIZER;
@@ -379,7 +327,7 @@ void acceptDataConnection()
         LOG_INFO("Waiting for the client heartbeat.\n");
         waitForClientAlive();
 
-        int lfd = bindServerSocket(DATA_PORT_NUM);
+        int lfd = bindServerSocket(DATA_PORT_NUM, BACKLOG);
         addrlen = sizeof(struct sockaddr_storage);
         LOG_INFO("Waiting for an image receiver to connect.\n");
         cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
@@ -408,7 +356,7 @@ void* acceptHeartbeatConnection()
 
     for (;;) { // Serve only one client connection at a time.
         addrlen = sizeof(struct sockaddr_storage);
-        int lfd = bindServerSocket(HEARTBEAT_PORT_NUM);
+        int lfd = bindServerSocket(HEARTBEAT_PORT_NUM, BACKLOG);
         LOG_INFO("Waiting for a client to connect to the heartbeat channel.\n");
         cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
         if (cfd == -1) {
