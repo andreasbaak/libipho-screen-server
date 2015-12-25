@@ -19,6 +19,7 @@ You should have received a copy of the GNU General Public License
 along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "boolean_util.h"
 #include "err_util.h"
 #include "file_util.h"
 #include "log_util.h"
@@ -46,8 +47,6 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #define COMMAND_IMAGE_TAKEN 1
 #define COMMAND_IMAGE_DATA  2
 #define COMMAND_HEARBEAT_PROBE 3;
-
-typedef enum { FALSE, TRUE } Boolean;
 
 typedef enum { DEAD, ALIVE } ClientStatus;
 // clientStatus indicates wheter the Android app is connected or not.
