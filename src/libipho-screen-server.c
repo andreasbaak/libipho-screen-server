@@ -420,17 +420,18 @@ int main(int argc, char *argv[])
     // Create a thread that reads commands from the pipe
     // and forwards the commands to our main thread.
     pthread_t command_tid;
-    if (pthread_create(&command_tid, NULL, readCommandsFromFifo, (void*)fifo_filename) != 0) {
-        fprintf(stderr, "Error while trying to create a thread.\n");
-        exit(1);
+    int perr;
+    perr = pthread_create(&command_tid, NULL, readCommandsFromFifo, (void*)fifo_filename);
+    if (perr != 0) {
+        errExitEN(perr, "Error while trying to create a thread.");
     }
 
     // Create a thread that sends a heartbeat to the client
     // in order to check whether she is alive
     pthread_t heartbeat_tid;
-    if (pthread_create(&heartbeat_tid, NULL, acceptHeartbeatConnection, NULL) != 0) {
-        fprintf(stderr, "Error while trying to create a thread.\n");
-        exit(1);
+    perr = pthread_create(&heartbeat_tid, NULL, acceptHeartbeatConnection, NULL);
+    if (perr != 0) {
+        errExitEN(perr, "Error while trying to create a thread.");
     }
 
     acceptDataConnection();
