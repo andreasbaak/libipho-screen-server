@@ -247,7 +247,7 @@ void forwardImages(int cfd)
             if (perr == ETIMEDOUT) {
                 // Check wheter the client is still alive.
                 if (getClientStatus() == DEAD) {
-                    printf("While waiting for commands, the heartbeat signaled that the client is dead.\n");
+                    LOG_INFO("While waiting for commands, the heartbeat signaled that the client is dead.\n");
                     perr = pthread_mutex_unlock(&commandMtx);
                     // Also close our file descriptor
                     if (close(cfd) == -1) {
