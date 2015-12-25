@@ -293,10 +293,10 @@ void forwardImages(int cfd)
             continue;
         }
 
+        LOG_INFO("Transmitting file %s.\n", commandCopy);
+
         char numBytesSplit[4];
         intToByteArray(file.size, numBytesSplit);
-
-        LOG_INFO("Sending command 'Image data'\n");
 
         cmd[0] = COMMAND_IMAGE_DATA;
         if (!writeFully(cfd, cmd, sizeof(cmd))) {
@@ -304,22 +304,18 @@ void forwardImages(int cfd)
             free(file.data);
             break;
         }
-
-        LOG_INFO("Sending file size: %d\n", file.size);
         if (!writeFully(cfd, numBytesSplit, sizeof(numBytesSplit))) {
             fprintf(stderr, "Error on write of num bytes\n");
             free(file.data);
             break;
         }
-
-        LOG_INFO("Sending file data.\n");
         if (!writeFully(cfd, file.data, file.size)) {
             fprintf(stderr, "Error on writing file data to the socket.\n");
             free(file.data);
             break;
         }
 
-        LOG_INFO("Done sending.\n");
+        LOG_INFO("File has been transmitted.\n");
         free(file.data);
     }
     setClientStatus(DEAD);
