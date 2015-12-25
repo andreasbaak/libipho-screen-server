@@ -64,7 +64,7 @@ void convertInteger(int fileSize, char* numBytesSplit)
  */
 int bindServerSocket(const char* portNum)
 {
-    LOG_INFO("Binding server socket.\n");
+    LOG_INFO("Binding server socket to port %s.\n", portNum);
 
     struct addrinfo hints;
     struct addrinfo* result;
