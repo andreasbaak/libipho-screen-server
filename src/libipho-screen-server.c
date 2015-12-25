@@ -484,7 +484,7 @@ void forwardImages(int cfd)
 }
 
 /**
- * Wait an incoming client connection.
+ * Wait for an incoming client connection.
  * As soon as a client connect, forward commands and
  * image filenames taken from the fifo to the client.
  * If any error occurrs while writing to the client,
