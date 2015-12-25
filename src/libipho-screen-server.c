@@ -19,8 +19,11 @@ You should have received a copy of the GNU General Public License
 along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <errno.h>
-#include <fcntl.h>
+#include "err_util.h"
+#include "file_util.h"
+#include "log_util.h"
+#include "time_util.h"
+
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -32,10 +35,6 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #include <sys/stat.h>
 #include <unistd.h>
 #include <time.h>
-#include "ename.c.inc"
-#include "time_util.h"
-
-#define LOG_INFO(...) printf(__VA_ARGS__)
 
 #define DATA_PORT_NUM "1338"
 #define HEARTBEAT_PORT_NUM "1339"
@@ -46,27 +45,6 @@ along with libipho-screen-server. If not, see <http://www.gnu.org/licenses/>.
 #define COMMAND_IMAGE_TAKEN 1
 #define COMMAND_IMAGE_DATA  2
 #define COMMAND_HEARBEAT_PROBE 3;
-
-void errExit(const char* msg)
-{
-    fprintf(stderr, "[%s %s] %s\n", (errno > 0) ? ename[errno] : "?UNKNOWN?", strerror(errno), msg);
-    exit(1);
-}
-
-void errExitEN(int en, const char* msg)
-{
-    fprintf(stderr, "[%s %s] %s\n", (en > 0) ? ename[en] : "?UNKNOWN?", strerror(en), msg);
-    exit(1);
-}
-
-void errMsg(const char* msg)
-{
-    int savedErrno;
-    savedErrno = errno;
-    fprintf(stderr, "[%s %s] %s\n", (errno > 0) ? ename[errno] : "?UNKNOWN?", strerror(errno), msg);
-    errno = savedErrno;
-}
-
 
 /**
  * numBytesSplit has to point to at least 4 bytes of memory.
@@ -79,106 +57,6 @@ void convertInteger(int fileSize, char* numBytesSplit)
         fileSize /= 0xff;
     }
 }
-
-void createImageFilenameFifo(const char* fifo_name)
-{
-    LOG_INFO("Creating named pipe %s for accepting new file names\n", fifo_name);
-    umask(0);
-    if (mkfifo(fifo_name, S_IRUSR | S_IWUSR) == -1
-            && errno != EEXIST)
-        errExit("mkfifo\n");
-}
-
-int openImageFilenameFifo(const char* fifo_name)
-{
-    int fifoFd = open(fifo_name, O_RDONLY);
-    if (fifoFd == -1)
-        errExit("Open fifo\n");
-    // Open extra write descriptor to avoid that we ever see an EOF
-    if (open(fifo_name, O_WRONLY) == -1)
-        errExit("Open dummy fifo\n");
-    return fifoFd;
-}
-
-
-/**
-  * Read data from fd and store it into the buffer
-  * until a newline character is found.
-  * This function ensures that the buffer is null terminated.
-  * The number of read characters is returned.
-  * The newline character is not stored into buffer and not counted.
-  *
-  * \return -2 if an unknown error occurred while reading from the fifo.
-  *         -1 if EOF is encountered and we have not read any data
-  *          0 if we have read only a newline character
-  *         >0 if we have received a valid string, return its length.
-  */
-ssize_t readLine(int fd, void* buffer, size_t bufSize)
-{
-    memset(buffer, 0, bufSize); // ensure null termination
-
-    size_t totRead = 0;
-    ssize_t numRead = 0;
-    char ch;
-    char *buf = buffer;
-    for (;;) {
-        numRead = read(fd, &ch,  1);
-        if (numRead == -1) {
-            if (errno == EINTR)
-                continue;
-            else
-                return -2;
-        } else if (numRead == 0) { // EOF
-            if (totRead == 0)
-                return -1;
-            else
-                break;
-        } else {
-            if (ch == '\n')
-                break; // do not store the newline character
-            if (totRead < bufSize - 1) { // discard all remaining bytes, ensure null termination
-                totRead++;
-                *buf++ = ch;
-            }
-        }
-    }
-    return totRead;
-}
-
-struct File {
-    char* data;
-    int   size;
-};
-
-/**
- * The caller has to provide a constructed File struct.
- * This function creates memory for File.data using malloc.
- * The caller has to free this memory.
- */
-int readFileData(const char* filename, struct File* file)
-{
-    int inputFd;
-    struct stat st;
-
-    inputFd = open(filename, O_RDONLY);
-    if (inputFd == -1) {
-        errMsg("open file\n");
-        return -1;
-    }
-
-    fstat(inputFd, &st);
-    file->size = st.st_size;
-    printf("File size: %d.\n", file->size);
-
-    file->data = (char*)malloc(file->size);
-    int numRead = read(inputFd, file->data, file->size);
-    if (numRead != file->size) {
-        fprintf(stderr, "Error while reading file data: read only %d bytes.\n", numRead);
-        return -1;
-    }
-    return 0;
-}
-
 
 /**
  *
@@ -344,7 +222,7 @@ void* readCommandsFromFifo(void* fifo_filename_void) {
     for (;;) {
         LOG_INFO("Waiting for a command on the FIFO %s\n", fifo_filename);
         if (fifoFd < 0) {
-            fifoFd = openImageFilenameFifo(fifo_filename);
+            fifoFd = openFifo(fifo_filename);
         }
 
         res = readLine(fifoFd, line, sizeof(line));
@@ -570,7 +448,7 @@ int main(int argc, char *argv[])
     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
         errExit("signal\n");
 
-    createImageFilenameFifo(fifo_filename);
+    createFifo(fifo_filename);
 
     // Create a thread that reads commands from the pipe
     // and forwards the commands to our main thread.
