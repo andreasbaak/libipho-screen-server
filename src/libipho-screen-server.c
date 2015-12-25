@@ -409,7 +409,7 @@ void* acceptHeartbeatConnection()
     for (;;) { // Serve only one client connection at a time.
         addrlen = sizeof(struct sockaddr_storage);
         int lfd = bindServerSocket(HEARTBEAT_PORT_NUM);
-        LOG_INFO("Waiting for an client to connect to the heartbeat channel.\n");
+        LOG_INFO("Waiting for a client to connect to the heartbeat channel.\n");
         cfd = accept(lfd, (struct sockaddr*) &claddr, &addrlen);
         if (cfd == -1) {
             errMsg("accept heartbeat");
