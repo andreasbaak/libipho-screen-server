@@ -37,7 +37,7 @@ int bindServerSocket(const char* portNum, int backlog)
     struct addrinfo* rp;
 
     int optval;
-    int lfd;
+    int lfd = -1;
 
     // Call getaddrinfo() to obtain a list of addresses that we can try binding to
     memset(&hints, 0, sizeof(struct addrinfo));
